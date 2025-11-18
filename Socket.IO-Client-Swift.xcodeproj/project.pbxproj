@@ -421,9 +421,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 572EF22D1B51F16C00EEBB58 /* Build configuration list for PBXNativeTarget "SocketIO-iOS" */;
 			buildPhases = (
+				572EF2161B51F16C00EEBB58 /* Headers */,
 				572EF2141B51F16C00EEBB58 /* Sources */,
 				572EF2151B51F16C00EEBB58 /* Frameworks */,
-				572EF2161B51F16C00EEBB58 /* Headers */,
 				572EF2171B51F16C00EEBB58 /* Resources */,
 			);
 			buildRules = (
@@ -537,7 +537,7 @@
 				TargetAttributes = {
 					572EF2181B51F16C00EEBB58 = {
 						CreatedOnToolsVersion = 6.4;
-						LastSwiftMigration = 1010;
+						LastSwiftMigration = 1340;
 					};
 					572EF2231B51F16C00EEBB58 = {
 						CreatedOnToolsVersion = 6.4;
@@ -904,6 +904,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "SocketIO-iOS/Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -958,6 +959,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "SocketIO-iOS/Info.plist";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				MTL_ENABLE_DEBUG_INFO = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = io.socket.SocketIOClientSwift;
