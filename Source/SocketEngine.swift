@@ -136,6 +136,8 @@ public final class SocketEngine : NSObject, URLSessionDelegate, SocketEnginePoll
     private var security: SSLSecurity?
     private var selfSigned = false
     private var voipEnabled = false
+    private var pingWorkItem: DispatchWorkItem?
+    private var isReleased = false
 
     // MARK: Initializers
 
@@ -200,7 +202,11 @@ public final class SocketEngine : NSObject, URLSessionDelegate, SocketEnginePoll
 
     deinit {
         DefaultSocketLogger.Logger.log("Engine is being released", type: logType)
+        isReleased = true
         closed = true
+        pingWorkItem?.cancel()
+        pingWorkItem = nil
+        ws?.delegate = nil
         stopPolling()
     }
 
@@ -238,6 +244,9 @@ public final class SocketEngine : NSObject, URLSessionDelegate, SocketEnginePoll
         invalidated = true
         connected = false
 
+        pingWorkItem?.cancel()
+        pingWorkItem = nil
+        ws?.delegate = nil
         ws?.disconnect()
         stopPolling()
         client?.engineDidClose(reason: reason)
@@ -568,7 +577,7 @@ public final class SocketEngine : NSObject, URLSessionDelegate, SocketEnginePoll
     }
 
     private func sendPing() {
-        guard connected else { return }
+        guard connected, !isReleased else { return }
 
         // Server is not responding
         if pongsMissed > pongsMissedMax {
@@ -582,7 +591,13 @@ public final class SocketEngine : NSObject, URLSessionDelegate, SocketEnginePoll
         pongsMissed += 1
         write("", withType: .ping, withData: [])
 
-        engineQueue.asyncAfter(deadline: DispatchTime.now() + Double(pingInterval)) {[weak self] in self?.sendPing() }
+        pingWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.isReleased else { return }
+            self.sendPing()
+        }
+        pingWorkItem = workItem
+        engineQueue.asyncAfter(deadline: DispatchTime.now() + Double(pingInterval), execute: workItem)
     }
 
     // Moves from long-polling to websockets

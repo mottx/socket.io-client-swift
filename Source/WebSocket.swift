@@ -147,11 +147,12 @@ open class WebSocket : NSObject, StreamDelegate {
     private var certValidated = false
     private var didDisconnect = false
     private var readyToWrite = false
+    private var isReleased = false
     private let mutex = NSLock()
     private let notificationCenter = NotificationCenter.default
     private var canDispatch: Bool {
         mutex.lock()
-        let canWork = readyToWrite
+        let canWork = readyToWrite && !isReleased
         mutex.unlock()
         return canWork
     }
@@ -911,13 +912,13 @@ open class WebSocket : NSObject, StreamDelegate {
      Used to preform the disconnect delegate
      */
     private func doDisconnect(_ error: NSError?) {
-        guard !didDisconnect else { return }
+        guard !didDisconnect, !isReleased else { return }
         didDisconnect = true
         isConnecting = false
         connected = false
         guard canDispatch else {return}
         callbackQueue.async { [weak self] in
-            guard let s = self else { return }
+            guard let s = self, !s.isReleased else { return }
             s.onDisconnect?(error)
             s.delegate?.websocketDidDisconnect(socket: s, error: error)
             let userInfo = error.map{ [WebsocketDisconnectionErrorKeyName: $0] }
@@ -928,8 +929,16 @@ open class WebSocket : NSObject, StreamDelegate {
     // MARK: - Deinit
     deinit {
         mutex.lock()
+        isReleased = true
         readyToWrite = false
         mutex.unlock()
+        delegate = nil
+        pongDelegate = nil
+        onConnect = nil
+        onDisconnect = nil
+        onText = nil
+        onData = nil
+        onPong = nil
         cleanupStream()
         writeQueue.cancelAllOperations()
     }
