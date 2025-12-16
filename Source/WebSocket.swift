@@ -157,7 +157,7 @@ open class WebSocket : NSObject, StreamDelegate {
         return canWork
     }
     /// The shared processing queue used for all WebSocket.
-    private static let sharedWorkQueue = DispatchQueue(label: "com.vluxe.starscream.websocket", attributes: [])
+    private static let sharedWorkQueue = DispatchQueue(label: "com.vluxe.starscream.websocket.socketio", attributes: [])
     
     /// Used for setting protocols.
     public init(url: URL, protocols: [String]? = nil) {
@@ -453,9 +453,14 @@ open class WebSocket : NSObject, StreamDelegate {
      Handles the incoming bytes and sending them to the proper processing method.
      */
     private func processInputStream() {
+        guard let inputStream = inputStream else {
+            return
+        }
+        
         let buf = NSMutableData(capacity: BUFFER_MAX)
         let buffer = UnsafeMutableRawPointer(mutating: buf!.bytes).assumingMemoryBound(to: UInt8.self)
-        let length = inputStream!.read(buffer, maxLength: BUFFER_MAX)
+        
+        let length = inputStream.read(buffer, maxLength: BUFFER_MAX)
         guard length > 0 else { return }
         var process = false
         if inputQueue.count == 0 {
