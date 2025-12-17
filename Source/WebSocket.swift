@@ -403,8 +403,15 @@ open class WebSocket : NSObject, StreamDelegate {
      Delegate for the stream methods. Processes incoming bytes
      */
     open func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
+        mutex.lock()
+        let released = isReleased
+        let currentInputStream = inputStream
+        mutex.unlock()
+
+        guard !released else { return }
+
         if eventCode == .hasBytesAvailable {
-            if aStream == inputStream {
+            if aStream == currentInputStream {
                 processInputStream()
             }
         } else if eventCode == .errorOccurred {
@@ -418,11 +425,14 @@ open class WebSocket : NSObject, StreamDelegate {
      Disconnect the stream object and notifies the delegate.
      */
     private func disconnectStream(_ error: NSError?, runDelegate: Bool = true) {
-        if error == nil {
-            writeQueue.waitUntilAllOperationsAreFinished()
-        } else {
-            writeQueue.cancelAllOperations()
+        mutex.lock()
+        guard !didDisconnect else {
+            mutex.unlock()
+            return
         }
+        mutex.unlock()
+
+        writeQueue.cancelAllOperations()
         cleanupStream()
         connected = false
         if runDelegate {
@@ -434,33 +444,45 @@ open class WebSocket : NSObject, StreamDelegate {
      cleanup the streams.
      */
     private func cleanupStream() {
-        outputStream?.delegate = nil
-        inputStream?.delegate = nil
-        if let stream = inputStream {
-            CFReadStreamSetDispatchQueue(stream, nil)
-            stream.close()
-        }
-        if let stream = outputStream {
-            CFWriteStreamSetDispatchQueue(stream, nil)
-            stream.close()
-        }
+        mutex.lock()
+        let outStream = outputStream
+        let inStream = inputStream
         outputStream = nil
         inputStream = nil
         fragBuffer = nil
+        mutex.unlock()
+
+        // Order matters: remove dispatch queue first, then close, then clear delegate
+        // This prevents in-flight events from accessing deallocated delegate
+        if let stream = inStream {
+            CFReadStreamSetDispatchQueue(stream, nil)
+            stream.close()
+        }
+        if let stream = outStream {
+            CFWriteStreamSetDispatchQueue(stream, nil)
+            stream.close()
+        }
+        // Set delegate to nil after removing from queue and closing
+        outStream?.delegate = nil
+        inStream?.delegate = nil
     }
     
     /**
      Handles the incoming bytes and sending them to the proper processing method.
      */
     private func processInputStream() {
-        guard let inputStream = inputStream else {
+        mutex.lock()
+        guard let stream = inputStream else {
+            mutex.unlock()
             return
         }
-        
+        mutex.unlock()
+
         let buf = NSMutableData(capacity: BUFFER_MAX)
-        let buffer = UnsafeMutableRawPointer(mutating: buf!.bytes).assumingMemoryBound(to: UInt8.self)
+        guard let bufBytes = buf?.bytes else { return }
+        let buffer = UnsafeMutableRawPointer(mutating: bufBytes).assumingMemoryBound(to: UInt8.self)
         
-        let length = inputStream.read(buffer, maxLength: BUFFER_MAX)
+        let length = stream.read(buffer, maxLength: BUFFER_MAX)
         guard length > 0 else { return }
         var process = false
         if inputQueue.count == 0 {
@@ -951,19 +973,26 @@ open class WebSocket : NSObject, StreamDelegate {
 }
 
 private extension Data {
-    
+
     init(buffer: UnsafeBufferPointer<UInt8>) {
-        self.init(bytes: buffer.baseAddress!, count: buffer.count)
+        if let base = buffer.baseAddress, buffer.count > 0 {
+            self.init(bytes: base, count: buffer.count)
+        } else {
+            self.init()
+        }
     }
-    
+
 }
 
 private extension UnsafeBufferPointer {
-    
+
     func fromOffset(_ offset: Int) -> UnsafeBufferPointer<Element> {
-        return UnsafeBufferPointer<Element>(start: baseAddress?.advanced(by: offset), count: count - offset)
+        guard let base = baseAddress, offset >= 0, offset < count else {
+            return UnsafeBufferPointer<Element>(start: nil, count: 0)
+        }
+        return UnsafeBufferPointer<Element>(start: base.advanced(by: offset), count: count - offset)
     }
-    
+
 }
 
 private let emptyBuffer = UnsafeBufferPointer<UInt8>(start: nil, count: 0)
