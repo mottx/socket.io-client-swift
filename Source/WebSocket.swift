@@ -138,6 +138,7 @@ open class WebSocket : NSObject, StreamDelegate {
     private var url: URL
     private var inputStream: InputStream?
     private var outputStream: OutputStream?
+    private var streamProxy: StreamDelegateProxy?
     private var connected = false
     private var isConnecting = false
     private var writeQueue = OperationQueue()
@@ -316,8 +317,10 @@ open class WebSocket : NSObject, StreamDelegate {
         inputStream = readStream!.takeRetainedValue()
         outputStream = writeStream!.takeRetainedValue()
         guard let inStream = inputStream, let outStream = outputStream else { return }
-        inStream.delegate = self
-        outStream.delegate = self
+        let proxy = StreamDelegateProxy(owner: self)
+        streamProxy = proxy
+        inStream.delegate = proxy
+        outStream.delegate = proxy
         if supportedSSLSchemes.contains(url.scheme!) {
             certValidated = false
             inStream.setProperty(StreamSocketSecurityLevel.negotiatedSSL as AnyObject, forKey: Stream.PropertyKey.socketSecurityLevelKey)
@@ -447,24 +450,32 @@ open class WebSocket : NSObject, StreamDelegate {
         mutex.lock()
         let outStream = outputStream
         let inStream = inputStream
+        let proxy = streamProxy
         outputStream = nil
         inputStream = nil
+        streamProxy = nil
         fragBuffer = nil
         mutex.unlock()
 
-        // Order matters: remove dispatch queue first, then close, then clear delegate
-        // This prevents in-flight events from accessing deallocated delegate
-        if let stream = inStream {
-            CFReadStreamSetDispatchQueue(stream, nil)
-            stream.close()
+        // Tear down on the queue that delivers stream events: this also runs from deinit, on
+        // any thread, and doing it there races events already queued and crashes in CFStream.
+        // The block owns the streams and the proxy, so it does not need self to stay alive.
+        WebSocket.sharedWorkQueue.async {
+            // Order matters: remove dispatch queue first, then close, then clear delegate
+            // This prevents in-flight events from accessing deallocated delegate
+            if let stream = inStream {
+                CFReadStreamSetDispatchQueue(stream, nil)
+                stream.close()
+            }
+            if let stream = outStream {
+                CFWriteStreamSetDispatchQueue(stream, nil)
+                stream.close()
+            }
+            // Set delegate to nil after removing from queue and closing
+            outStream?.delegate = nil
+            inStream?.delegate = nil
+            withExtendedLifetime(proxy) {}
         }
-        if let stream = outStream {
-            CFWriteStreamSetDispatchQueue(stream, nil)
-            stream.close()
-        }
-        // Set delegate to nil after removing from queue and closing
-        outStream?.delegate = nil
-        inStream?.delegate = nil
     }
     
     /**
@@ -969,7 +980,21 @@ open class WebSocket : NSObject, StreamDelegate {
         cleanupStream()
         writeQueue.cancelAllOperations()
     }
-    
+
+}
+
+/// The delegate of the streams, so that they never point at a WebSocket being deallocated.
+/// Streams keep their delegate unretained, and cleanupStream() keeps this alive until they are torn down.
+private final class StreamDelegateProxy: NSObject, StreamDelegate {
+    private weak var owner: WebSocket?
+
+    init(owner: WebSocket) {
+        self.owner = owner
+    }
+
+    func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
+        owner?.stream(aStream, handle: eventCode)
+    }
 }
 
 private extension Data {
